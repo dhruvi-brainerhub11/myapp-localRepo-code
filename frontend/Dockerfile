@@ -1,5 +1,5 @@
-# Build stage
-FROM node:18-alpine as builder
+# Production Dockerfile using serve
+FROM node:18-alpine
 
 WORKDIR /app
 
@@ -16,17 +16,11 @@ COPY public ./public
 # Build React app
 RUN npm run build
 
-# Production stage
-FROM nginx:alpine
-
-# Copy built app from builder
-COPY --from=builder /app/build /usr/share/nginx/html
-
-# Copy nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Install serve globally
+RUN npm install -g serve
 
 # Expose port
-EXPOSE 80
+EXPOSE 3000
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Serve the build folder on port 3000
+CMD ["serve", "-s", "build", "-l", "3000"]

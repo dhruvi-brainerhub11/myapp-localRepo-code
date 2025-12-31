@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 5000;
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost",
-  process.env.CORS_ORIGIN // For ECS/ALB
+  process.env.CORS_ORIGIN  // from .env for production ALB URL
 ].filter(Boolean);
 
 app.use(express.json());
@@ -68,7 +68,7 @@ async function initializeDatabase() {
 }
 
 // Routes
-app.get("/api/health", async (req, res) => {
+app.get("/health", async (req, res) => {
   try {
     const connection = await pool.getConnection();
     connection.release();
