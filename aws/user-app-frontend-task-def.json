@@ -52,7 +52,6 @@
         }
     ],
     "cpu": "512",
-    "enableFaultInjection": false,
     "executionRoleArn": "arn:aws:iam::619576923139:role/dhruvi-task-role",
     "family": "user-app-frontend-task-def",
     "memory": "2048",
