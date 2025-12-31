@@ -10,7 +10,7 @@ on:
       - main
      
 env:
-  AWS_REGION: ap-south-1
+  AWS_REGION: 
   ECR_REGISTRY_BACKEND: user-app-backend
   ECR_REGISTRY_FRONTEND: user-app-frontend
   RDS_ENDPOINT: myappdb.c9oq2ky8kisq.ap-south-1.rds.amazonaws.com

@@ -9,7 +9,6 @@ const PORT = process.env.PORT || 5000;
 // Allow localhost:3000 always for local dev
 const allowedOrigins = [
   "http://localhost:3000",
-  "http://localhost",
   process.env.CORS_ORIGIN  // from .env for production ALB URL
 ].filter(Boolean);
 
