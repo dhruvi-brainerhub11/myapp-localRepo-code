@@ -1,65 +1,69 @@
-name: Frontend – Build & Deploy to ECS
+name: Frontend Deploy (ECS)
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
 
 env:
   AWS_REGION: ap-south-1
-  ECS_CLUSTER: user-app-cluster
-  ECS_SERVICE: user-app-frontend-task-def-service
-  TASK_DEFINITION: user-app-frontend-task-def
+  CLUSTER: user-app-cluster
+  SERVICE: user-app-frontend-service
+  TASK_DEF: user-app-frontend-task-def
+  CONTAINER: frontend
   ECR_REPO: frontend-user-app
 
 jobs:
-  deploy-frontend:
+  deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
+      - uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build & Push Frontend Image
         run: |
+          IMAGE=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
           docker build \
             --build-arg REACT_APP_API_URL=${{ secrets.REACT_APP_API_URL }} \
-            -t ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }} \
-            ./frontend
-          docker push ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
+            -t $IMAGE ./frontend
+          docker push $IMAGE
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
-      - name: Download Task Definition
+      - name: Download CLEAN task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition ${{ env.TASK_DEFINITION }} \
-            --query taskDefinition > task-def.json
+            --task-definition $TASK_DEF \
+            --query 'taskDefinition | {
+              family: family,
+              executionRoleArn: executionRoleArn,
+              taskRoleArn: taskRoleArn,
+              networkMode: networkMode,
+              containerDefinitions: containerDefinitions,
+              requiresCompatibilities: requiresCompatibilities,
+              cpu: cpu,
+              memory: memory,
+              runtimePlatform: runtimePlatform
+            }' > task-def.json
 
-      - name: Render Task Definition
-        id: render
+      - name: Render task definition
         uses: aws-actions/amazon-ecs-render-task-definition@v1
+        id: render
         with:
           task-definition: task-def.json
-          container-name: frontend
-          image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
+          container-name: ${{ env.CONTAINER }}
+          image: ${{ env.IMAGE }}
 
       - name: Deploy Frontend
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: ${{ env.ECS_CLUSTER }}
-          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.CLUSTER }}
+          service: ${{ env.SERVICE }}
           task-definition: ${{ steps.render.outputs.task-definition }}
           wait-for-service-stability: true
