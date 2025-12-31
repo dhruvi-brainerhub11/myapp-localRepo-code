@@ -1,67 +1,65 @@
-name: Backend – Build & Deploy to ECS
+name: Backend Deploy
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
 
 env:
   AWS_REGION: ap-south-1
   ECS_CLUSTER: user-app-cluster
-  ECS_SERVICE: user-app-backend-taskdef-service
+  ECS_SERVICE: user-app-backend-service
   TASK_DEFINITION: user-app-backend-taskdef
+  CONTAINER_NAME: backend
   ECR_REPO: backend-user-app
+
 jobs:
-  deploy-backend:
+  deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: AWS Login
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to ECR
-        id: ecr
+      - name: ECR Login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build & Push Backend Image
+      - name: Build & Push Image
         run: |
-          docker build -t ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }} ./backend
-          docker push ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
+          IMAGE=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
+          docker build -t $IMAGE ./backend
+          docker push $IMAGE
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
-      - name: Download Task Definition
+      - name: Get CLEAN task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition ${{ env.TASK_DEFINITION }} \
-            --query taskDefinition > task-def.json
+            --task-definition $TASK_DEFINITION \
+            --query 'taskDefinition | {
+              family: family,
+              networkMode: networkMode,
+              executionRoleArn: executionRoleArn,
+              taskRoleArn: taskRoleArn,
+              containerDefinitions: containerDefinitions,
+              requiresCompatibilities: requiresCompatibilities,
+              cpu: cpu,
+              memory: memory
+            }' > task-def.json
 
-      - name: Render Task Definition
-        id: render
+      - name: Update task definition image
         uses: aws-actions/amazon-ecs-render-task-definition@v1
+        id: render
         with:
           task-definition: task-def.json
-          container-name: backend
-          image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
-          environment-variables: |
-            DB_HOST=${{ secrets.DB_HOST }}
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            DB_NAME=${{ secrets.DB_NAME }}
-            DB_PORT=${{ secrets.DB_PORT }}
-            CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}
-            NODE_ENV=production
-            PORT=5000
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ env.IMAGE }}
 
-      - name: Deploy Backend
+      - name: Deploy to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
           cluster: ${{ env.ECS_CLUSTER }}
