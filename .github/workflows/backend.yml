@@ -1,65 +1,68 @@
 name: Deploy Backend to ECS
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ main ]
+    paths:
+      - backend/**
+  workflow_dispatch:
 
-permissions:
-  contents: read
+env:
+  AWS_REGION: ap-south-1
+  ECS_CLUSTER: user-app-cluster
+  ECS_SERVICE: user-app-backend-taskdef-service
+  ECS_TASK_DEFINITION: user-app-backend-taskdef
+  CONTAINER_NAME: backend
+  ECR_REPO: backend-user-app
 
 jobs:
-  deploy:
+  deploy-backend:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
-      # 1️⃣ Checkout code
-      - name: Checkout
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      # 2️⃣ Configure AWS credentials
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      # 3️⃣ Login to Amazon ECR
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-      # 4️⃣ Build & Push Backend Image
-      - name: Build and Push Backend Image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPO: ${{ secrets.ECR_REPOSITORY_BACKEND }}
-          IMAGE_TAG: docker tag backend-user-app:latest 619576923139.dkr.ecr.ap-south-1.amazonaws.com/backend-user-app:latest
-        run: |
-          IMAGE=$ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
-          echo "Building image: $IMAGE"
+    - name: Build & Push Backend Image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG backend
+        docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
-          docker build -t backend-user-app .
-          docker push 619576923139.dkr.ecr.ap-south-1.amazonaws.com/backend-user-app:latest
+    - name: Download Task Definition
+      run: |
+        aws ecs describe-task-definition \
+          --task-definition $ECS_TASK_DEFINITION \
+          --query taskDefinition > task-def.json
 
-          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+    - name: Render Task Definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: task-def.json
+        container-name: ${{ env.CONTAINER_NAME }}
+        image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
 
-      # 5️⃣ Render ECS Task Definition (ONLY image update)
-      - name: Render Task Definition
-        id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: ${{ secrets.ECS_TASK_DEFINITION_BACKEND }}
-          container-name: ${{ secrets.CONTAINER_NAME_BACKEND }}
-          image: ${{ env.IMAGE }}
-
-      # 6️⃣ Deploy to ECS Fargate
-      - name: Deploy to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          cluster: ${{ secrets.ECS_CLUSTER }}
-          service: ${{ secrets.ECS_SERVICE_BACKEND }}
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          wait-for-service-stability: true
+    - name: Deploy Backend Service
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true
