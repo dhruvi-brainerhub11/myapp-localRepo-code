@@ -1,4 +1,4 @@
-name: Deploy Backend to ECS
+name: Deploy to Amazon ECS   
 
 on:
   workflow_dispatch:
@@ -8,56 +8,63 @@ permissions:
 
 jobs:
   deploy:
+    name: Deploy
     runs-on: ubuntu-latest
+    environment: AWS
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout branch ecs deployment
+      uses: actions/checkout@v4
+      with:
+        ref: auth-table-changes
+      
+    - name: Create .env file
+      run: |
+        echo "DB_HOST=${{ secrets.DB_HOST }}" >> .env
+        echo "DB_USER=${{ secrets.DB_USER }}" >> .env
+        echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+        echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
+        echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
+        echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
+        echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
+        echo "S3_BUCKET_NAME=${{ secrets.S3_BUCKET_NAME }}" >> .env
+        echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
+        echo "OTHER_ENV_VAR=${{ secrets.OTHER_ENV_VAR }}" >> .env
 
-      - name: Create backend .env
-        run: |
-          cat <<EOF > ./backend/.env
-          DB_HOST=${{ secrets.DB_HOST }}
-          DB_PORT=3306
-          DB_USER=${{ secrets.DB_USER }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          DB_NAME=${{ secrets.DB_NAME }}
-          CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}
-          PORT=5000
-          NODE_ENV=production
-          EOF
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build -t $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
+        echo "image=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Build & Push Backend Image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: v${{ github.run_number }}
-        run: |
-          docker build -t $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_BACKEND }}:$IMAGE_TAG ./backend
-          docker push $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_BACKEND }}:$IMAGE_TAG
 
-      - name: Render ECS task definition
-        id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: ${{ secrets.ECS_TASK_DEFINITION_BACKEND }}
-          container-name: backend
-          image: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_BACKEND }}:v${{ github.run_number }}
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ${{ secrets.ECS_TASK_DEFINITION }}
+        container-name: ${{ secrets.CONTAINER_NAME }}
+        image: ${{ steps.build-image.outputs.image }}
 
-      - name: Deploy Backend to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          cluster: ${{ secrets.ECS_CLUSTER }}
-          service: ${{ secrets.ECS_SERVICE_BACKEND }}
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          wait-for-service-stability: true
+    - name: Deploy Amazon ECS task definition
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ secrets.ECS_SERVICE }}
+        cluster: ${{ secrets.ECS_CLUSTER }}
+        wait-for-service-stability: true
