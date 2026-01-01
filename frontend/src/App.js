@@ -12,7 +12,7 @@ function App() {
   const [success, setSuccess] = useState(null);
 
   // Backend API
-  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+  const API_URL = process.env.REACT_APP_API_URL; 
 
   // Fetch all users
   const fetchUsers = async () => {
