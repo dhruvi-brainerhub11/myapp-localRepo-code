@@ -12,7 +12,7 @@ function App() {
   const [success, setSuccess] = useState(null);
 
   // Backend API
-  const API_URL = process.env.REACT_APP_API_URL; 
+  const API_URL = process.env.REACT_APP_API_URL || http://user-app-ALB-1522157061.ap-south-1.elb.amazonaws.com
 
   // Fetch all users
   const fetchUsers = async () => {
